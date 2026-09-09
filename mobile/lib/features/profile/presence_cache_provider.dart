@@ -9,11 +9,26 @@ import '../../shared/relay/relay.dart';
 /// Community-scoped presence: missing keys mean unknown, not offline.
 /// Live updates overlap authenticated snapshots; foreground polling observes
 /// relay lease expiry and retries failed reads without a tight retry loop.
+///
+/// Ordering: live events carry the subject's signer clock, snapshot records
+/// carry the relay clock at synthesis, and the two are never compared
+/// directly. Live events order against live events by `createdAt`; a live
+/// event older than the last settled snapshot observation is ambiguous (it
+/// may predate the observation, or be signed by a clock behind the relay's),
+/// and since the relay ingests presence before fan-out a fresh snapshot
+/// always reflects it — so it is confirmed rather than applied or dropped.
+/// Equal-second conflicts settle last-arrival-wins.
 class PresenceCacheNotifier extends Notifier<Map<String, String>> {
+  /// Bounded memory of recently handled live event ids so a redelivered
+  /// ambiguous event cannot re-arm confirmation refreshes.
+  static const _seenIdLimit = 256;
+
   final Set<String> _tracked = {};
   final Set<String> _pending = {};
   final Map<String, int> _revisions = {};
   final Map<String, int> _timestamps = {};
+  final Map<String, int> _snapshotAt = {};
+  final List<String> _seenIds = [];
   void Function()? _presenceUnsub;
   Timer? _poll;
   Timer? _queued;
@@ -38,6 +53,8 @@ class PresenceCacheNotifier extends Notifier<Map<String, String>> {
     _querying = _opening = _retrying = false;
     _revisions.clear();
     _timestamps.clear();
+    _snapshotAt.clear();
+    _seenIds.clear();
     _pending
       ..clear()
       ..addAll(_tracked);
@@ -135,12 +152,23 @@ class PresenceCacheNotifier extends Notifier<Map<String, String>> {
   }
 
   void _handlePresenceEvent(NostrEvent event) {
+    if (_seenRecently(event.id)) return;
     final pubkey = event.pubkey.toLowerCase();
     final status = event.content.trim();
     if (event.kind != EventKind.presenceUpdate ||
         !_tracked.contains(pubkey) ||
         !_validStatus(status) ||
         event.createdAt < (_timestamps[pubkey] ?? 0)) {
+      return;
+    }
+    // The snapshot was observed at the relay clock; this event was signed at
+    // the subject's clock. A lower timestamp is ambiguous — the event may
+    // predate the observation, or be signed by a lagging clock after it. The
+    // relay ingests presence before fan-out, so a fresh snapshot reflects
+    // this event (or a newer one) either way: confirm instead of guessing.
+    if (event.createdAt < (_snapshotAt[pubkey] ?? 0)) {
+      _pending.add(pubkey);
+      _schedule(_generation);
       return;
     }
     _timestamps[pubkey] = event.createdAt;
@@ -174,6 +202,7 @@ class PresenceCacheNotifier extends Notifier<Map<String, String>> {
       }
       if (generation != _generation || epoch != _epoch) return;
       final latest = <String, NostrEvent>{};
+      var observedAt = 0;
       for (final event in events ?? <NostrEvent>[]) {
         final key = (event.getTagValue('p') ?? event.pubkey).toLowerCase();
         if (!revisions.containsKey(key) ||
@@ -185,6 +214,7 @@ class PresenceCacheNotifier extends Notifier<Map<String, String>> {
             event.createdAt > latest[key]!.createdAt) {
           latest[key] = event;
         }
+        if (event.createdAt > observedAt) observedAt = event.createdAt;
       }
       final updated = {...state};
       for (final key in keys) {
@@ -192,12 +222,25 @@ class PresenceCacheNotifier extends Notifier<Map<String, String>> {
         if (events == null) {
           updated.remove(key); // failure is unknown; next poll retries
         } else {
+          // Synthesized records share the relay's synthesis clock, so the
+          // freshest record marks the observation second for the whole batch;
+          // an empty answer carries no observable clock and keeps the prior
+          // observation second untouched.
+          if (observedAt > 0) _snapshotAt[key] = observedAt;
           updated[key] = latest[key]?.content.trim() ?? 'offline';
         }
       }
       if (!mapEquals(state, updated)) state = updated;
     }
     _querying = false;
+  }
+
+  bool _seenRecently(String id) {
+    if (id.isEmpty) return false;
+    if (_seenIds.contains(id)) return true;
+    _seenIds.add(id);
+    if (_seenIds.length > _seenIdLimit) _seenIds.removeAt(0);
+    return false;
   }
 
   bool _validStatus(String status) =>
