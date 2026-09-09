@@ -16,7 +16,8 @@ class SelectedMentionAuthorization {
   /// owner policy produces a deny-all entry, never runtime fallback.
   final AgentDirectoryEntry? agent;
 
-  const SelectedMentionAuthorization._(this.kind, this.isMember, this.agent);
+  /// Construct evidence, not a publication or role-write capability.
+  const SelectedMentionAuthorization(this.kind, this.isMember, this.agent);
 
   bool get requiresAgentAuthorization => kind != SelectedMentionKind.ordinary;
 
@@ -46,6 +47,7 @@ readSelectedMentionAuthorization(
   required String channelId,
   Set<String> priorAgentKeys = const {},
   required bool Function() isCurrent,
+  void Function(Map<String, NostrEvent>)? onProfileEvidence,
 }) async {
   void check() {
     if (!isCurrent()) throw StateError('Mention authorization scope changed');
@@ -107,6 +109,7 @@ readSelectedMentionAuthorization(
     checkCurrent: check,
     onProfileEvidence: (value) => profiles = value,
   );
+  onProfileEvidence?.call(profiles);
   check();
   final latestRuntime = <String, NostrEvent>{};
   for (final event in runtime) {
@@ -162,7 +165,7 @@ readSelectedMentionAuthorization(
             : const [],
       );
     }
-    result[key] = SelectedMentionAuthorization._(
+    result[key] = SelectedMentionAuthorization(
       kind,
       members.containsKey(key),
       agent,

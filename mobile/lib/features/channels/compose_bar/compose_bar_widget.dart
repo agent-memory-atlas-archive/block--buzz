@@ -485,13 +485,31 @@ class ComposeBar extends HookConsumerWidget {
         var authorizationRevision = submittedDraftRevision;
         final visit = authorizationVisit.value;
         final config = ref.read(relayConfigProvider);
-        final readAuthorization = ref.read(agentAuthorizationReaderProvider);
+        final readSelected = ref.read(
+          selectedMentionAuthorizationReaderProvider,
+        );
+        final session = ref.read(relaySessionProvider.notifier);
+        final observedProfiles = <String, NostrEvent>{};
+        final observedKeys = <String>{};
+        bool profilesCurrent() => observedProfiles.entries.every((entry) {
+          final order = ref
+              .read(userCacheProvider.notifier)
+              .profileEventOrder(entry.key);
+          final event = entry.value;
+          return order == null ||
+              order.createdAt < event.createdAt ||
+              (order.createdAt == event.createdAt &&
+                  order.eventId.compareTo(event.id) >= 0);
+        });
         bool ownsSource() =>
             context.mounted &&
             visit == authorizationVisit.value &&
             identical(config, ref.read(relayConfigProvider));
         bool isAuthorizationCurrent() =>
             ownsSource() &&
+            identical(session, ref.read(relaySessionProvider.notifier)) &&
+            currentPubkey == ref.read(currentPubkeyProvider) &&
+            profilesCurrent() &&
             submittedUploadGeneration == uploadGeneration.value &&
             authorizationRevision == draftRevision.value &&
             identical(config, ref.read(relayConfigProvider));
@@ -499,6 +517,11 @@ class ComposeBar extends HookConsumerWidget {
           if (!context.mounted) throw const _ComposeAuthorizationCancelled();
           if (!identical(config, ref.read(relayConfigProvider))) {
             throw StateError('Community changed during authorization');
+          }
+          if (!identical(session, ref.read(relaySessionProvider.notifier)) ||
+              currentPubkey != ref.read(currentPubkeyProvider) ||
+              !profilesCurrent()) {
+            throw Exception('Mention evidence changed; retry the draft');
           }
           if (submittedUploadGeneration != uploadGeneration.value ||
               visit != authorizationVisit.value ||
@@ -508,26 +531,6 @@ class ComposeBar extends HookConsumerWidget {
         }
 
         checkPreparationCurrent = ensureAuthorizationCurrent;
-
-        Future<void> authorize(Set<String> keys, {bool prepare = false}) async {
-          if (keys.isEmpty) return;
-          ensureAuthorizationCurrent();
-          try {
-            await authorizeAgentMentions(
-              readAuthorization,
-              keys,
-              currentPubkey,
-              channelId,
-              isAuthorizationCurrent,
-              prepare: prepare,
-            );
-          } catch (_) {
-            // A stale request is cancellation, not an access decision.
-            ensureAuthorizationCurrent();
-            rethrow;
-          }
-          ensureAuthorizationCurrent();
-        }
 
         // Resolved before any await: see
         // `_reportSendCancelledByCommunitySwitch`.
@@ -542,15 +545,72 @@ class ComposeBar extends HookConsumerWidget {
           selectedMentions,
           '${ref.read(relayConfigProvider).baseUrl} / $channelId',
         );
-        final intendedAgentKeys = {
+        final selectedKeys = outgoing.pubkeys.toSet();
+        final priorAgentKeys = {
           for (final mention in selectedMentions)
             if (mention.isAgent) mention.pubkey.toLowerCase(),
         };
+        Future<Map<String, SelectedMentionAuthorization>> authorize(
+          Set<String> keys, {
+          bool prepare = false,
+        }) async {
+          ensureAuthorizationCurrent();
+          if (keys.isEmpty) return const {};
+          try {
+            final evidence = await readSelected(
+              keys,
+              priorAgentKeys.intersection(keys),
+              currentPubkey ?? '',
+              channelId,
+              isAuthorizationCurrent,
+              (profiles) {
+                for (final key in keys) {
+                  if (observedKeys.contains(key) &&
+                      observedProfiles[key]?.id != profiles[key]?.id) {
+                    throw Exception(
+                      'Mention evidence changed; retry the draft',
+                    );
+                  }
+                }
+                observedKeys.addAll(keys);
+                observedProfiles.addAll(profiles);
+              },
+            );
+            ensureAuthorizationCurrent();
+            if (evidence.length != keys.length ||
+                !evidence.keys.toSet().containsAll(keys)) {
+              throw Exception('Incomplete selected mention evidence');
+            }
+            final agents = {
+              for (final key in keys)
+                if (evidence[key]!.requiresAgentAuthorization) key,
+            };
+            priorAgentKeys.addAll(agents);
+            await authorizeAgentMentions(
+              (_, _, _, _) async => [
+                for (final key in agents) ?evidence[key]!.agent,
+              ],
+              agents,
+              currentPubkey,
+              channelId,
+              isAuthorizationCurrent,
+              prepare: prepare,
+            );
+            ensureAuthorizationCurrent();
+            return evidence;
+          } catch (_) {
+            ensureAuthorizationCurrent();
+            rethrow;
+          }
+        }
+
+        final initialEvidence = await authorize(selectedKeys, prepare: true);
         final scan = await _scanNonMemberMentions(
           ref,
           channelId: channelId,
           selectedMentions: selectedMentions,
           currentPubkey: currentPubkey,
+          evidence: initialEvidence,
         );
 
         ensureAuthorizationCurrent();
@@ -583,7 +643,18 @@ class ComposeBar extends HookConsumerWidget {
 
         // Agent failures stop publication; the original draft keeps its keys.
         Future<void> addMentionedNonMembers() async {
-          final keys = intendedAgentKeys.intersection(outgoing.pubkeys.toSet());
+          final keys = outgoing.pubkeys.toSet();
+          Future<bool> authorizeWrite(String key, String role) async {
+            final evidence = await authorize(keys, prepare: true);
+            final fresh = evidence[key]!;
+            if (fresh.invitationRole != role) {
+              throw Exception(
+                'Mention classification changed; retry invitation consent',
+              );
+            }
+            return !fresh.isMember;
+          }
+
           await authorize(keys, prepare: true);
           ensureAuthorizationCurrent();
           invitationStarted.value = true;
@@ -592,6 +663,7 @@ class ComposeBar extends HookConsumerWidget {
             scan: scan,
             messenger: messenger,
             ensureCurrent: ensureAuthorizationCurrent,
+            authorizeWrite: authorizeWrite,
           );
           if (!outgoing.pubkeys.toSet().containsAll(keys)) {
             throw Exception(
@@ -600,7 +672,7 @@ class ComposeBar extends HookConsumerWidget {
           }
           await authorize(keys);
           if (queuedAttachments.isEmpty ||
-              (intendedAgentKeys.isNotEmpty ||
+              (selectedKeys.isNotEmpty ||
                   scan.humans.isNotEmpty ||
                   scan.agentPubkeys.isNotEmpty)) {
             ensureAuthorizationCurrent();
@@ -639,7 +711,7 @@ class ComposeBar extends HookConsumerWidget {
         );
         // Agent authorization is preparation, not a detached background send.
         final preparingAgents =
-            intendedAgentKeys.isNotEmpty || scan.humans.isNotEmpty;
+            selectedKeys.isNotEmpty || scan.humans.isNotEmpty;
         if (!preparingAgents) clearComposer();
         final clearedDraftRevision = draftRevision.value;
         authorizationRevision = clearedDraftRevision;

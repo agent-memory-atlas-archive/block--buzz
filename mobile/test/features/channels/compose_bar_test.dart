@@ -31,6 +31,7 @@ import 'package:buzz/shared/widgets/mobile_tab_footer_backdrop.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 part 'compose_bar_test/publication_tests.dart';
+part 'compose_bar_test/classification_tests.dart';
 part 'compose_bar_test/send_lifecycle_tests.dart';
 part 'compose_bar_test/invitation_tests.dart';
 
@@ -180,6 +181,7 @@ Widget _buildComposeBar({
   Future<List<ChannelMember>>? membersFuture,
   Future<List<ChannelMember>> Function()? membersLoader,
   AgentAuthorizationReader? authorizationReader,
+  SelectedMentionAuthorizationReader? selectedReader,
   List<AgentDirectoryEntry> relayAgents = const <AgentDirectoryEntry>[],
   List<Channel> channels = const <Channel>[],
   List<ChannelMember> cachedMembers = const <ChannelMember>[],
@@ -218,17 +220,47 @@ Widget _buildComposeBar({
         (ref) =>
             membersLoader?.call() ?? membersFuture ?? Future.value(members),
       ),
-      agentAuthorizationReaderProvider.overrideWithValue(
-        authorizationReader ??
-            (keys, viewer, channel, current) async => [
-              for (final key in keys)
-                AgentDirectoryEntry(
-                  pubkey: key,
-                  respondTo: 'anyone',
-                  ownerPubkey: viewer,
-                  channelIds: [channel],
-                ),
-            ],
+      selectedMentionAuthorizationReaderProvider.overrideWithValue(
+        selectedReader ??
+            (keys, prior, viewer, channel, current, observed) async {
+              final roster =
+                  await (membersLoader?.call() ??
+                      membersFuture ??
+                      Future.value(members));
+              final agentKeys = {
+                ...prior,
+                for (final agent in relayAgents)
+                  if (keys.contains(agent.pubkey)) agent.pubkey,
+              };
+              final agents = agentKeys.isEmpty
+                  ? <AgentDirectoryEntry>[]
+                  : await (authorizationReader?.call(
+                          agentKeys,
+                          viewer,
+                          channel,
+                          current,
+                        ) ??
+                        Future.value([
+                          for (final key in agentKeys)
+                            AgentDirectoryEntry(
+                              pubkey: key,
+                              respondTo: 'anyone',
+                              ownerPubkey: viewer,
+                              channelIds: [channel],
+                            ),
+                        ]));
+              return {
+                for (final key in keys)
+                  key: SelectedMentionAuthorization(
+                    agentKeys.contains(key)
+                        ? SelectedMentionKind.agent
+                        : SelectedMentionKind.ordinary,
+                    roster.any((member) => member.pubkey == key) ||
+                        channels.any((c) => c.id == channel && c.isDm),
+                    agents.where((agent) => agent.pubkey == key).firstOrNull,
+                  ),
+              };
+            },
       ),
       agentDirectoryProvider.overrideWith((ref) async => relayAgents),
       agentOwnersProvider.overrideWith((ref) async => const <String, String>{}),
@@ -675,6 +707,7 @@ class _FakeChannelsNotifier extends ChannelsNotifier {
 
 void main() {
   _publicationTests();
+  classificationTests();
   sendLifecycleTests();
   invitationTests();
   TestWidgetsFlutterBinding.ensureInitialized();
