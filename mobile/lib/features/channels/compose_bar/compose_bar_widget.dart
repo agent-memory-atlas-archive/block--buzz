@@ -485,6 +485,13 @@ class ComposeBar extends HookConsumerWidget {
         var authorizationRevision = submittedDraftRevision;
         final visit = authorizationVisit.value;
         final config = ref.read(relayConfigProvider);
+        // Equivalent refreshes retain scope; destination/credentials do not.
+        bool isConfigScopeCurrent() {
+          final current = ref.read(relayConfigProvider);
+          return current.baseUrl == config.baseUrl &&
+              current.nsec == config.nsec;
+        }
+
         final readSelected = ref.read(
           selectedMentionAuthorizationReaderProvider,
         );
@@ -504,7 +511,7 @@ class ComposeBar extends HookConsumerWidget {
         bool ownsSource() =>
             context.mounted &&
             visit == authorizationVisit.value &&
-            identical(config, ref.read(relayConfigProvider));
+            isConfigScopeCurrent();
         bool isAuthorizationCurrent() =>
             ownsSource() &&
             identical(session, ref.read(relaySessionProvider.notifier)) &&
@@ -512,21 +519,21 @@ class ComposeBar extends HookConsumerWidget {
             profilesCurrent() &&
             submittedUploadGeneration == uploadGeneration.value &&
             authorizationRevision == draftRevision.value &&
-            identical(config, ref.read(relayConfigProvider));
+            isConfigScopeCurrent();
         void ensureAuthorizationCurrent() {
           if (!context.mounted) throw const _ComposeAuthorizationCancelled();
-          if (!identical(config, ref.read(relayConfigProvider))) {
+          if (!isConfigScopeCurrent()) {
             throw StateError('Community changed during authorization');
-          }
-          if (!identical(session, ref.read(relaySessionProvider.notifier)) ||
-              currentPubkey != ref.read(currentPubkeyProvider) ||
-              !profilesCurrent()) {
-            throw Exception('Mention evidence changed; retry the draft');
           }
           if (submittedUploadGeneration != uploadGeneration.value ||
               visit != authorizationVisit.value ||
               authorizationRevision != draftRevision.value) {
             throw const _ComposeAuthorizationCancelled();
+          }
+          if (!identical(session, ref.read(relaySessionProvider.notifier)) ||
+              currentPubkey != ref.read(currentPubkeyProvider) ||
+              !profilesCurrent()) {
+            throw Exception('Mention evidence changed; retry the draft');
           }
         }
 

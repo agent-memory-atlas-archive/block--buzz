@@ -2,6 +2,9 @@ part of '../compose_bar_test.dart';
 
 void classificationTests() {
   for (final mode in [
+    'equivalent config',
+    'credential change',
+    'relay change',
     'ordinary member',
     'ordinary invite',
     'fresh agent',
@@ -10,6 +13,8 @@ void classificationTests() {
     'missing key',
     'consent change',
     'perwrite change',
+    'revision change',
+    'policy change',
     'accepted prefix',
     'accepted cancellation',
   ]) {
@@ -35,6 +40,9 @@ void classificationTests() {
         _buildComposeBar(
           uploadService: _testUploadService(signer.nsec),
           currentPubkey: signer.public,
+          relayConfig: () => _SwitchableRelayConfigNotifier(
+            RelayConfig(baseUrl: 'https://relay.example', nsec: signer.nsec),
+          ),
           members: savedAgent ? [] : roster,
           relayAgents: savedAgent ? [_testAgent(key)] : [],
           channels: [_makeCurrentChannel(), _makeSharedMemberChannel()],
@@ -44,10 +52,24 @@ void classificationTests() {
                 if (reads == 0) expect(prior, savedAgent ? {key} : isEmpty);
                 expect(current(), isTrue);
                 reads++;
+                if (mode == 'revision change') {
+                  observed({
+                    key: NostrEvent(
+                      id: '$reads',
+                      pubkey: key,
+                      createdAt: reads,
+                      kind: 0,
+                      tags: [],
+                      content: '{}',
+                      sig: '',
+                    ),
+                  });
+                }
                 if (mode == 'missing key') return {};
                 final agent =
                     mode == 'fresh agent' ||
                     mode == 'denied agent' ||
+                    mode == 'policy change' ||
                     (mode == 'consent change' && reads >= 2) ||
                     (mode == 'perwrite change' && reads >= 3);
                 return {
@@ -62,7 +84,9 @@ void classificationTests() {
                         ? AgentDirectoryEntry(
                             pubkey: key,
                             ownerPubkey: viewer,
-                            respondTo: mode == 'denied agent'
+                            respondTo:
+                                (mode == 'denied agent' ||
+                                    mode == 'policy change' && reads >= 2)
                                 ? 'nobody'
                                 : 'anyone',
                             channelIds: accepted ? [channel] : [],
@@ -88,6 +112,22 @@ void classificationTests() {
           onEventAcknowledged: (event) {
             if (event['kind'] != 9000) return;
             accepted = true;
+            if ([
+              'equivalent config',
+              'credential change',
+              'relay change',
+            ].contains(mode)) {
+              container
+                  .read(relayConfigProvider.notifier)
+                  .update(
+                    baseUrl: mode == 'relay change'
+                        ? 'https://other.example'
+                        : 'https://relay.example',
+                    nsec: mode == 'credential change'
+                        ? nostr.Keys.generate().nsec
+                        : signer.nsec,
+                  );
+            }
             if (mode == 'accepted cancellation') {
               controller.text = 'new draft';
             }
@@ -111,10 +151,14 @@ void classificationTests() {
         await tester.tap(find.text('Invite'));
         await tester.pumpAndSettle();
       }
+      if (mode == 'revision change' || mode == 'policy change') {
+        expect(reads, 2);
+      }
       if (mode == 'consent change' || mode == 'perwrite change') {
         expect(reads, 3);
       }
       final succeeds = [
+        'equivalent config',
         'ordinary member',
         'ordinary invite',
         'fresh agent',
@@ -124,7 +168,16 @@ void classificationTests() {
       expect(
         writes,
         hasLength(
-          ['ordinary invite', 'fresh agent'].contains(mode) || prefix ? 1 : 0,
+          [
+                    'ordinary invite',
+                    'fresh agent',
+                    'equivalent config',
+                    'credential change',
+                    'relay change',
+                  ].contains(mode) ||
+                  prefix
+              ? 1
+              : 0,
         ),
       );
       if (writes.isNotEmpty) {
@@ -140,7 +193,9 @@ void classificationTests() {
       if (!succeeds) {
         expect(
           controller.text,
-          mode == 'accepted cancellation'
+          ['credential change', 'relay change'].contains(mode)
+              ? '' // The new identity owns a separate empty composer.
+              : mode == 'accepted cancellation'
               ? 'new draft'
               : savedAgent
               ? '@Helper Bot '
