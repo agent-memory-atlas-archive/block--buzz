@@ -29,6 +29,9 @@ import 'package:buzz/shared/theme/theme.dart';
 import 'package:buzz/shared/widgets/anchored_popover_menu.dart';
 import 'package:buzz/shared/widgets/mobile_tab_footer_backdrop.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+// Shared fixture prerequisite; production-observation rows land in the child PR.
+// ignore: unused_import
+import '../../shared/mentions/agent_policy_test.dart' show signed;
 
 part 'compose_bar_test/publication_tests.dart';
 part 'compose_bar_test/classification_tests.dart';
@@ -182,6 +185,8 @@ Widget _buildComposeBar({
   Future<List<ChannelMember>> Function()? membersLoader,
   AgentAuthorizationReader? authorizationReader,
   SelectedMentionAuthorizationReader? selectedReader,
+  RelayRateLimitGate? rateLimitGate,
+  http.Client? relayHttpClient,
   List<AgentDirectoryEntry> relayAgents = const <AgentDirectoryEntry>[],
   List<Channel> channels = const <Channel>[],
   List<ChannelMember> cachedMembers = const <ChannelMember>[],
@@ -204,6 +209,13 @@ Widget _buildComposeBar({
 }) {
   return ProviderScope(
     overrides: [
+      if (rateLimitGate != null || relayHttpClient != null)
+        relaySessionProvider.overrideWith(
+          () => RelaySessionNotifier(
+            rateLimitGate: rateLimitGate,
+            httpClient: relayHttpClient,
+          ),
+        ),
       customEmojiListProvider.overrideWithValue(customEmoji),
       mediaUploadServiceProvider.overrideWithValue(uploadService),
       if (voiceNoteRecorderFactory != null)
@@ -610,6 +622,33 @@ class _SwitchableRelayConfigNotifier extends RelayConfigNotifier {
   @override
   RelayConfig build() => initial;
 }
+
+// Shared fixture prerequisite; production-observation rows land in the child PR.
+// ignore: unused_element
+http.Client _selectedRosterClient(
+  String authority,
+  NostrEvent Function() rosterEvent, {
+  List<NostrEvent> Function()? extraEvents,
+}) => http_testing.MockClient((request) async {
+  if (request.method == 'GET') {
+    return http.Response(jsonEncode({'self': authority}), 200);
+  }
+  final filters = jsonDecode(request.body) as List;
+  return http.Response(
+    jsonEncode([
+      if (filters.any((f) => (f['kinds'] as List).contains(39002)))
+        rosterEvent().toJson(),
+      for (final event in extraEvents?.call() ?? <NostrEvent>[])
+        if (filters.any(
+          (f) =>
+              (f['kinds'] as List).contains(event.kind) &&
+              (f['authors'] as List).contains(event.pubkey),
+        ))
+          event.toJson(),
+    ]),
+    200,
+  );
+});
 
 class _RecordingRelaySocket extends RelaySocket {
   final List<Map<String, dynamic>> events;

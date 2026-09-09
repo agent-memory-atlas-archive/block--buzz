@@ -1,5 +1,7 @@
 part of 'agent_identity_provider.dart';
 
+bool _unfencedSelectedEvidence() => true;
+
 /// Evidence requirements, not a claim that an ordinary identity is human.
 enum SelectedMentionKind { ordinary, agent, unresolvedAgent }
 
@@ -16,8 +18,16 @@ class SelectedMentionAuthorization {
   /// owner policy produces a deny-all entry, never runtime fallback.
   final AgentDirectoryEntry? agent;
 
+  /// Local observed evidence capability, retained through actual enqueue.
+  final bool Function() isCurrent;
+
   /// Construct evidence, not a publication or role-write capability.
-  const SelectedMentionAuthorization(this.kind, this.isMember, this.agent);
+  const SelectedMentionAuthorization(
+    this.kind,
+    this.isMember,
+    this.agent, {
+    this.isCurrent = _unfencedSelectedEvidence,
+  });
 
   bool get requiresAgentAuthorization => kind != SelectedMentionKind.ordinary;
 

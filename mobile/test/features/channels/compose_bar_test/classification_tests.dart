@@ -1,6 +1,81 @@
 part of '../compose_bar_test.dart';
 
 void classificationTests() {
+  testWidgets(
+    'composer evidence expires during actual invitation capacity wait',
+    (tester) async {
+      final signer = nostr.Keys.generate();
+      final key = 'a' * 64;
+      final gate = RelayRateLimitGate();
+      final events = <Map<String, dynamic>>[];
+      var current = true;
+      var reads = 0;
+      await tester.pumpWidget(
+        _buildComposeBar(
+          uploadService: _testUploadService(signer.nsec),
+          currentPubkey: signer.public,
+          rateLimitGate: gate,
+          relayConfig: () => _SwitchableRelayConfigNotifier(
+            RelayConfig(baseUrl: 'https://relay.example', nsec: signer.nsec),
+          ),
+          members: [
+            ChannelMember(
+              pubkey: key,
+              displayName: 'Alice',
+              role: 'member',
+              joinedAt: DateTime(2025),
+            ),
+          ],
+          channels: [_makeCurrentChannel(), _makeSharedMemberChannel()],
+          selectedReader:
+              (keys, prior, viewer, channel, valid, observed) async {
+                reads++;
+                return {
+                  key: SelectedMentionAuthorization(
+                    SelectedMentionKind.ordinary,
+                    false,
+                    null,
+                    isCurrent: () => current,
+                  ),
+                };
+              },
+          onSend: (_, _, {mediaTags = const []}) async =>
+              fail('must retain exact draft'),
+        ),
+      );
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(ComposeBar)),
+      );
+      final session = container.read(relaySessionProvider.notifier);
+      session.debugAttachSocketForTest(
+        _RecordingRelaySocket(events, session.debugHandleSocketMessageForTest),
+      );
+      await _expandComposer(tester);
+      await tester.enterText(find.byType(TextField), '@ali');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Alice'));
+      await tester.pumpAndSettle();
+      final controller = tester
+          .widget<TextField>(find.byType(TextField))
+          .controller!;
+      final draft = controller.text;
+      await tester.tap(find.byIcon(LucideIcons.arrowUp));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      gate.activate(300);
+      await tester.tap(find.text('Invite'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(reads, greaterThanOrEqualTo(3));
+      expect(events.where((event) => event['kind'] == 9000), isEmpty);
+      current = false;
+      gate.reset();
+      await tester.pumpAndSettle();
+      expect(events.where((event) => event['kind'] == 9000), isEmpty);
+      expect(controller.text, draft);
+      expect(find.byType(SnackBar), findsOneWidget);
+    },
+  );
   for (final mode in [
     'equivalent config',
     'credential change',

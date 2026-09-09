@@ -79,6 +79,7 @@ class ChannelActions {
 
   /// Reports each acknowledged write before checking continuation scope.
   /// [onAccepted] records irreversible outcomes; it must not mutate scope caches.
+  /// The community and enclosing operation scope also fence queued writes.
   Future<void> addMembers({
     required String channelId,
     required List<String> pubkeys,
@@ -103,14 +104,17 @@ class ChannelActions {
       // add, not be recorded as this pubkey's rejection.
       _ensureCommunityValid();
       try {
-        await _signedEventRelay.submit(
-          kind: 9000,
-          content: '',
-          tags: [
-            ['h', channelId],
-            ['p', pubkey],
-            ['role', normalizedRole],
-          ],
+        await withRelayPublicationGuard(
+          _ensureCommunityValid,
+          () => _signedEventRelay.submit(
+            kind: 9000,
+            content: '',
+            tags: [
+              ['h', channelId],
+              ['p', pubkey],
+              ['role', normalizedRole],
+            ],
+          ),
         );
       } catch (error) {
         failures[pubkey] = _relayErrorMessage(error);

@@ -479,6 +479,7 @@ Future<_NonMemberAddOutcome> _addMentionedNonMembers(
   required List<String> humanPubkeys,
   required bool canAddMembers,
   required VoidCallback ensureCurrent,
+  required VoidCallback ensureScopeCurrent,
   required VoidCallback onAccepted,
   required Future<bool> Function(String, String) authorizeWrite,
 }) async {
@@ -500,17 +501,20 @@ Future<_NonMemberAddOutcome> _addMentionedNonMembers(
   final notAdded = <String>[];
   final errors = <String>[];
   for (final (pubkeys, role) in pending) {
-    ensureCurrent();
+    ensureScopeCurrent();
     if (!await authorizeWrite(pubkeys.single, role)) continue;
     ensureCurrent();
     try {
-      await channelActions.addMembers(
-        channelId: channelId,
-        pubkeys: pubkeys,
-        role: role,
-        onAccepted: (_) => onAccepted(),
+      await withRelayPublicationGuard(
+        ensureCurrent,
+        () => channelActions.addMembers(
+          channelId: channelId,
+          pubkeys: pubkeys,
+          role: role,
+          onAccepted: (_) => onAccepted(),
+        ),
       );
-      ensureCurrent();
+      ensureScopeCurrent();
     } on _ComposeAuthorizationCancelled {
       rethrow;
     } on StateError {
@@ -666,6 +670,7 @@ class _OutgoingMentions {
     required _NonMemberMentionScan scan,
     required ScaffoldMessengerState? messenger,
     required VoidCallback ensureCurrent,
+    required VoidCallback ensureScopeCurrent,
     required Future<bool> Function(String, String) authorizeWrite,
   }) async {
     final outcome = await _addMentionedNonMembers(
@@ -677,6 +682,7 @@ class _OutgoingMentions {
           .toList(),
       canAddMembers: scan.canAddMembers,
       ensureCurrent: ensureCurrent,
+      ensureScopeCurrent: ensureScopeCurrent,
       onAccepted: () => acceptedInvitations++,
       authorizeWrite: authorizeWrite,
     );
