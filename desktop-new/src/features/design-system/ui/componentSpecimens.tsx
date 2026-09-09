@@ -8,6 +8,7 @@ import {
 } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
+import { OnboardingShowcase } from "@/features/onboarding/ui/OnboardingShowcase";
 import { Avatar } from "@/shared/ui/Avatar";
 import { InlineChip } from "@/shared/ui/InlineChip";
 import { Button } from "@/shared/ui/Button";
@@ -18,6 +19,7 @@ import { NavigationSection } from "@/shared/ui/NavigationSection";
 import { PanelHeader } from "@/shared/ui/PanelHeader";
 import { SearchField } from "@/shared/ui/SearchField";
 import { Tabs } from "@/shared/ui/Tabs";
+import { TextField } from "@/shared/ui/TextField";
 
 import { ComponentAnatomy } from "./ComponentAnatomy";
 import {
@@ -318,6 +320,41 @@ function PanelSpecimen() {
             designed to sit on, not content supplied by the specimen. */}
         <div className="component-single-surface-demo">
           <Panel aria-label="Panel surface" />
+        </div>
+      </SpecimenGroup>
+    </div>
+  );
+}
+
+function TextFieldSpecimen() {
+  return (
+    <div className="component-specimen-stack">
+      <SpecimenGroup label="Content">
+        <div className="w-full max-w-sm">
+          <TextField
+            label="Email address"
+            placeholder="name@example.com"
+            description="We’ll use this to help you sign in."
+            type="email"
+          />
+        </div>
+      </SpecimenGroup>
+      <SpecimenGroup label="States">
+        <div className="component-specimen-stack w-full max-w-sm">
+          <Specimen>
+            <TextField label="Name" placeholder="Enter your name" />
+          </Specimen>
+          <Specimen prop='error="Enter a valid email address"'>
+            <TextField
+              label="Email address"
+              defaultValue="not-an-email"
+              error="Enter a valid email address"
+              type="email"
+            />
+          </Specimen>
+          <Specimen prop="disabled">
+            <TextField label="Workspace" defaultValue="Buzz" disabled />
+          </Specimen>
         </div>
       </SpecimenGroup>
     </div>
@@ -822,9 +859,11 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
   tabs: TabsSpecimen,
   "conversation-header": ConversationHeaderSpecimen,
   "panel-header": PanelHeaderSpecimen,
+  "text-field": TextFieldSpecimen,
   "search-field": SearchFieldSpecimen,
   "navigation-section": NavigationSectionSpecimen,
   "navigation-item": NavigationItemSpecimen,
   composer: MessageComposerSpecimen,
   "activity-rail": ActivityRailSpecimen,
+  onboarding: OnboardingShowcase,
 };
