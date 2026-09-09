@@ -12,6 +12,7 @@ import { OnboardingShowcase } from "@/features/onboarding/ui/OnboardingShowcase"
 import { Avatar } from "@/shared/ui/Avatar";
 import { InlineChip } from "@/shared/ui/InlineChip";
 import { Button } from "@/shared/ui/Button";
+import { CodeInput } from "@/shared/ui/CodeInput";
 import { ConversationHeader } from "@/shared/ui/ConversationHeader";
 import { IconButton } from "@/shared/ui/IconButton";
 import { NavigationItem } from "@/shared/ui/NavigationItem";
@@ -342,6 +343,7 @@ function TextFieldSpecimen() {
             defaultValue="buzz-password"
             type="password"
           />
+          <CodeInput label="Verification code" defaultValue="284619" />
         </div>
       </SpecimenGroup>
       <SpecimenGroup label="Inset — states">
@@ -389,6 +391,16 @@ function TextFieldSpecimen() {
             />
           </Specimen>
         </div>
+      </SpecimenGroup>
+    </div>
+  );
+}
+
+function CodeInputSpecimen() {
+  return (
+    <div className="component-specimen-stack">
+      <SpecimenGroup label="Six-digit verification code">
+        <CodeInput label="Verification code" defaultValue="284619" />
       </SpecimenGroup>
     </div>
   );
@@ -893,6 +905,7 @@ export const COMPONENT_SPECIMENS: Record<string, () => ReactNode> = {
   "conversation-header": ConversationHeaderSpecimen,
   "panel-header": PanelHeaderSpecimen,
   "text-field": TextFieldSpecimen,
+  "code-input": CodeInputSpecimen,
   "search-field": SearchFieldSpecimen,
   "navigation-section": NavigationSectionSpecimen,
   "navigation-item": NavigationItemSpecimen,
