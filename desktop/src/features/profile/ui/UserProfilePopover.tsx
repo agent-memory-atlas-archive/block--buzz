@@ -49,6 +49,8 @@ type UserProfilePopoverProps = {
   children: React.ReactNode;
   pubkey: string;
   triggerElement?: "div" | "span";
+  /** Trigger layout override for inline content that must fragment with prose. */
+  triggerClassName?: string;
   /** Accessible name for interactive trigger content that is visually hidden. */
   triggerAriaLabel?: string;
   /** Set false when the trigger is inside another interactive control. */
@@ -129,6 +131,7 @@ export function UserProfilePopover({
   children,
   pubkey,
   triggerElement = "div",
+  triggerClassName,
   triggerAriaLabel,
   enableProfilePanel = true,
   enableHoverPopover = true,
@@ -214,6 +217,7 @@ export function UserProfilePopover({
           className={cn(
             "inline-flex",
             canOpenProfilePanel && "cursor-pointer [&_*]:cursor-pointer",
+            triggerClassName,
           )}
         >
           {children}
