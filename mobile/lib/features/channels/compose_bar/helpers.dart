@@ -475,8 +475,8 @@ Future<_NonMemberAddOutcome> _addMentionedNonMembers(
         channelId: channelId,
         pubkeys: pubkeys,
         role: role,
+        onAccepted: (_) => onAccepted(),
       );
-      onAccepted();
       ensureCurrent();
     } on _ComposeAuthorizationCancelled {
       rethrow;
@@ -578,6 +578,7 @@ class _OutgoingMentions {
   List<String> _invitedHumanPubkeys = const [];
   bool _inviteAgents = false;
   int acceptedInvitations = 0;
+  final String sourceDestination;
 
   void reportIncomplete(ScaffoldMessengerState? messenger) {
     if (acceptedInvitations == 0) return;
@@ -585,14 +586,17 @@ class _OutgoingMentions {
       SnackBar(
         content: Text(
           'Message not sent. $acceptedInvitations invitation(s) completed and remain '
-          'in effect. Your draft is kept. Review channel members before retrying.',
+          'in effect in $sourceDestination. Review channel members before retrying. '
+          'Check your draft; attachments may need reattaching after leaving.',
         ),
       ),
     );
   }
 
-  _OutgoingMentions(List<MentionCandidate> selectedMentions)
-    : pubkeys = LinkedHashSet<String>.from(
+  _OutgoingMentions(
+    List<MentionCandidate> selectedMentions,
+    this.sourceDestination,
+  ) : pubkeys = LinkedHashSet<String>.from(
         selectedMentions.map((candidate) => candidate.pubkey.toLowerCase()),
       ).toList();
 

@@ -538,7 +538,10 @@ class ComposeBar extends HookConsumerWidget {
           for (final entry in mentionMap.value.entries)
             if (hasMention(text, entry.key)) entry.value,
         ];
-        final outgoing = _OutgoingMentions(selectedMentions);
+        final outgoing = _OutgoingMentions(
+          selectedMentions,
+          '${ref.read(relayConfigProvider).baseUrl} / $channelId',
+        );
         final intendedAgentKeys = {
           for (final mention in selectedMentions)
             if (mention.isAgent) mention.pubkey.toLowerCase(),
