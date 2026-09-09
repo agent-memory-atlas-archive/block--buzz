@@ -1,5 +1,35 @@
 part of '../compose_bar.dart';
 
+void _reportComposeSendError(
+  BuildContext context,
+  Object error,
+  VoidCallback? checkPreparationCurrent,
+) {
+  var displayError = error;
+  var communityChanged = false;
+  // Failed awaits need the same scope/edit classification as success.
+  try {
+    checkPreparationCurrent?.call();
+    if (error is _ComposeAuthorizationCancelled) return;
+  } on _ComposeAuthorizationCancelled {
+    return;
+  } on StateError {
+    communityChanged = true;
+  } on Exception catch (currentError) {
+    displayError = currentError;
+  }
+  if (context.mounted) {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (communityChanged) {
+      _reportSendCancelledByCommunitySwitch(messenger);
+    } else {
+      messenger?.showSnackBar(
+        SnackBar(content: Text(_composeSendErrorMessage(displayError))),
+      );
+    }
+  }
+}
+
 String _composerDraftIdentity(WidgetRef ref) =>
     '${ref.watch(relayConfigProvider).baseUrl}'
     ':${ref.watch(myPubkeyProvider) ?? 'anon'}';

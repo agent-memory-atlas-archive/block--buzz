@@ -776,25 +776,8 @@ class ComposeBar extends HookConsumerWidget {
           }
         }());
       } catch (error) {
-        var communityChanged = false;
-        // Failed awaits need the same scope/edit classification as success.
-        try {
-          checkPreparationCurrent?.call();
-          if (error is _ComposeAuthorizationCancelled) return;
-        } on _ComposeAuthorizationCancelled {
-          return;
-        } on StateError {
-          communityChanged = true;
-        }
         if (context.mounted) {
-          final messenger = ScaffoldMessenger.maybeOf(context);
-          if (communityChanged) {
-            _reportSendCancelledByCommunitySwitch(messenger);
-          } else {
-            messenger?.showSnackBar(
-              SnackBar(content: Text(_composeSendErrorMessage(error))),
-            );
-          }
+          _reportComposeSendError(context, error, checkPreparationCurrent);
         }
       } finally {
         if (context.mounted && authorizationAttempt.value == attempt) {

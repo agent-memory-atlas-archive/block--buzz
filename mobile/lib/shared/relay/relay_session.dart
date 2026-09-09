@@ -381,7 +381,22 @@ class RelaySessionNotifier extends Notifier<SessionState> {
   void debugDispose() => _dispose();
 
   @visibleForTesting
-  void debugSupersedeConnection() => _connectionGeneration++;
+  void debugSupersedeConnection() => _supersedeConnection();
+
+  int _supersedeConnection() {
+    return ++_connectionGeneration;
+  }
+
+  /// Selected evidence cannot cross socket replacement or a capacity pause.
+  bool Function() retainPublicationEvidence() {
+    final generation = _connectionGeneration;
+    final epoch = _rateLimitGate.epoch;
+    final admitted = !_rateLimitGate.isActive;
+    return () =>
+        admitted &&
+        _isActiveConnection(generation) &&
+        epoch == _rateLimitGate.epoch;
+  }
 
   @visibleForTesting
   void debugHandleDisconnected([Object? error]) {
@@ -494,7 +509,7 @@ class RelaySessionNotifier extends Notifier<SessionState> {
   Future<void> _connect(RelayConfig config) async {
     if (_disposed) return;
 
-    final generation = ++_connectionGeneration;
+    final generation = _supersedeConnection();
     state = SessionState(
       status: _hasConnectedOnce
           ? SessionStatus.reconnecting
