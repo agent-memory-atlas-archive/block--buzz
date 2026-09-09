@@ -155,11 +155,14 @@ void sendLifecycleTests() {
       await tester.tap(find.byIcon(LucideIcons.arrowUp));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
+      expect(find.textContaining('Invitations take effect'), findsOneWidget);
       await tester.tap(find.text('Invite'));
       await tester.pump();
       expect(events.where((e) => e['kind'] == 9000), hasLength(1));
       if (action == 'cancel') {
         await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text('Cancel'), findsNothing);
+        expect(find.text('Stop remaining'), findsOneWidget);
         await tester.tap(find.byKey(const ValueKey('compose-upload-cancel')));
       } else if (action == 'revisit') {
         await tester.pumpWidget(build(thread: 'other'));
@@ -167,6 +170,10 @@ void sendLifecycleTests() {
       }
       gate.complete();
       await tester.pumpAndSettle();
+      expect(
+        find.textContaining('1 invitation(s) completed and remain in effect'),
+        findsOneWidget,
+      );
       await tester.pump(const Duration(seconds: 5));
       await tester.pumpAndSettle();
       expect(sends, 0);
