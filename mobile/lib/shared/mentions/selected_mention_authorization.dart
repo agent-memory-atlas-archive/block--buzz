@@ -59,8 +59,36 @@ readSelectedMentionAuthorization(
   required bool Function() isCurrent,
   void Function(Map<String, NostrEvent>)? onProfileEvidence,
 }) async {
+  final fences = <bool Function()>[session.retainPublicationEvidence()];
+  bool evidenceCurrent() => fences.every((check) => check());
   void check() {
-    if (!isCurrent()) throw StateError('Mention authorization scope changed');
+    if (!isCurrent() || !evidenceCurrent()) {
+      throw StateError('Mention authorization scope changed');
+    }
+  }
+
+  void observeQuery(List<NostrFilter> filters, List<NostrEvent>? events) {
+    for (final filter in filters) {
+      for (final kind in filter.kinds) {
+        for (final author in filter.authors!) {
+          fences.add(
+            events == null
+                ? session.evidenceClock.retain(
+                    kind,
+                    author,
+                    filter.tags['#d']?.single,
+                  )
+                : session.evidenceClock.snapshot(
+                    kind,
+                    author,
+                    filter.tags['#d']?.single,
+                    events,
+                  ),
+          );
+        }
+      }
+    }
+    check();
   }
 
   check();
@@ -74,12 +102,16 @@ readSelectedMentionAuthorization(
   if (requestedKeys.isEmpty) return const {};
   final authority = await session.fetchRelaySelf();
   check();
+  fences.add(session.evidenceClock.retain(39002, authority, channelId));
   final membership = await _membershipPages(
     session,
     authority,
     viewer,
     channelId,
     check,
+  );
+  fences.add(
+    session.evidenceClock.snapshot(39002, authority, channelId, membership),
   );
   check();
   NostrEvent? roster;
@@ -106,10 +138,15 @@ readSelectedMentionAuthorization(
     }
     members[tag[1]] = tag.length >= 4 ? tag[3] : 'member';
   }
-  final runtime = await _queryAgentFilters(session, [
-    for (final key in requestedKeys)
-      NostrFilter(kinds: const [10100], authors: [key], limit: 1),
-  ], checkCurrent: check);
+  final runtime = await _queryAgentFilters(
+    session,
+    [
+      for (final key in requestedKeys)
+        NostrFilter(kinds: const [10100], authors: [key], limit: 1),
+    ],
+    checkCurrent: check,
+    onQueryEvidence: observeQuery,
+  );
   check();
   Map<String, NostrEvent> profiles = const {};
   final policies = await resolveAgentPolicies(
@@ -118,6 +155,7 @@ readSelectedMentionAuthorization(
     requestedKeys: requestedKeys,
     checkCurrent: check,
     onProfileEvidence: (value) => profiles = value,
+    onQueryEvidence: observeQuery,
   );
   onProfileEvidence?.call(profiles);
   check();
@@ -179,6 +217,7 @@ readSelectedMentionAuthorization(
       kind,
       members.containsKey(key),
       agent,
+      isCurrent: evidenceCurrent,
     );
   }
   check();
